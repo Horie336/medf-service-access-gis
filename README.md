@@ -1,4 +1,4 @@
-# \ MEDF Service Access and Repayment Risk Map
+#  MEDF Service Access and Repayment Risk Map
 
 # 
 
@@ -10,14 +10,14 @@
 
 # 
 
-# \*\*Note:\*\* All client and loan data is synthetic.** No real MEDF data is included. Arrears
+# Note: All client and loan data is synthetic.** No real MEDF data is included. Arrears
 levels are set to reflect the scale of the repayment challenge, and the
 distance-arrears pattern is built into the data to illustrate the method. It is
 not a finding about real clients or MEDF's actual portfolio..
 
 # 
 
-# \## Problem
+# Problem
 
 # 
 
@@ -35,7 +35,7 @@ made without strong geographic evidence.
 
 # 
 
-# \## What the system does
+#  What the system does
 
 # 
 
@@ -50,7 +50,7 @@ made without strong geographic evidence.
 7. Recommends the top 3 sites that reach the most underserved clients
 # 
 
-# \## Setup (work in progress)
+#  Setup (work in progress)
 
 # 
 1. Install PostgreSQL and PostGIS, and create a database.
@@ -73,7 +73,7 @@ made without strong geographic evidence.
    Optional settings: `DB_HOST`, `DB_PORT`, `DB_USER`. The defaults are localhost, 5432 and postgres.
 5. Open http://127.0.0.1:5000
 
-# \ ## API endpoints
+#  API endpoints
 
 | Endpoint | Returns |
 |---|---|
@@ -85,7 +85,7 @@ made without strong geographic evidence.
 | `/api/recommend?threshold=..&radius_km=..&n=3` | Top suggested sites |
 | `/api/save-candidate` (POST) | Saves a candidate site to the database |
 | `/api/clear-candidates` (POST) | Removes saved candidate sites |
-## Project structure
+ Project structure
 
 # 
 
