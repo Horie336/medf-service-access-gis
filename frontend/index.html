@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MEDF Service Access and Repayment Risk</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  body { margin:0; display:flex; height:100vh; font-family:Arial, sans-serif; font-size:13px; }
+  #side { width:350px; padding:12px; overflow-y:auto; background:#f4f6f8; box-sizing:border-box; }
+  #map { flex:1; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  h3 { font-size:13px; margin:14px 0 6px; }
+  .kpis { display:flex; gap:6px; }
+  .kpi { flex:1; background:#fff; border-radius:6px; padding:8px; text-align:center; box-shadow:0 1px 2px #0002; }
+  .kpi b { display:block; font-size:18px; }
+  table { width:100%; border-collapse:collapse; background:#fff; }
+  th, td { padding:4px 6px; border-bottom:1px solid #e3e3e3; text-align:left; }
+  select, input { width:100%; padding:4px; box-sizing:border-box; }
+  button { width:100%; padding:6px; margin-top:6px; cursor:pointer; }
+  .legend span { display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 8px; }
+  .note { color:#555; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>MEDF Service Access and Repayment Risk</h1>
+  <div class="note">Synthetic data for demonstration.</div>
+
+  <h3>Underserved threshold (km from nearest service point)</h3>
+  <input id="thr" type="number" value="10" min="1" max="50">
+
+  <h3>Overview</h3>
+  <div class="kpis">
+    <div class="kpi"><b id="k-total">-</b>Clients</div>
+    <div class="kpi"><b id="k-under">-</b>Underserved</div>
+    <div class="kpi"><b id="k-arrears">-</b>Arrears (MK m)</div>
+  </div>
+
+  <h3>Colour clients by</h3>
+  <select id="mode">
+    <option value="band">Distance band</option>
+    <option value="status">Loan status</option>
+  </select>
+  <div class="legend" id="legend"></div>
+
+  <h3>Arrears rate by distance band (%)</h3>
+  <canvas id="chart" height="170"></canvas>
+
+  <h3>Underserved clients by district</h3>
+  <div class="note">District of each client's nearest service point.</div>
+  <table id="dist"><tr><th>District</th><th>Underserved</th><th>Total</th></tr></table>
+
+  <h3>Candidate site tool</h3>
+  <div class="note">Click the map to test a proposed new service point.</div>
+  <label>Service radius (km)</label>
+  <input id="radius" type="number" value="8" min="1" max="30">
+  <div id="cand-result" class="note" style="margin-top:6px"></div>
+  <button id="save" disabled>Save as candidate site</button>
+  <button id="recommend">Recommend top 3 sites</button>
+  <div id="rec-result" class="note" style="margin-top:6px"></div>
+  <button id="clear">Clear saved candidate sites</button>
+</div>
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const bandColor = {'0-5 km':'#2e7d32', '5-10 km':'#f9a825', '10+ km':'#c62828'};
+const statusColor = {performing:'#2e7d32', late:'#f9a825', default:'#c62828'};
+const order = ['0-5 km', '5-10 km', '10+ km'];
+const $ = id => document.getElementById(id);
+const get = async url => (await fetch(url)).json();
+const fmt = n => Math.round(n).toLocaleString();
+const thr = () => parseFloat($('thr').value) || 10;
+const rad = () => parseFloat($('radius').value) || 8;
+
+const map = L.map('map').setView([-15.2, 35.3], 8);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {maxZoom:18, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+
+let clientData, clientLayer, spLayer, candLayer, recLayer, clicked = null;
+
+function drawClients() {
+  const mode = $('mode').value;
+  if (clientLayer) map.removeLayer(clientLayer);
+  clientLayer = L.geoJSON(clientData, {
+    pointToLayer: (f, ll) => L.circleMarker(ll, {
+      radius:5, color:'#222', weight: f.properties.dist_km > thr() ? 2 : 0.5, fillOpacity:0.85,
+      fillColor: mode === 'band' ? bandColor[f.properties.dist_band] : statusColor[f.properties.status]
+    }),
+    onEachFeature: (f, layer) => {
+      const p = f.properties;
+      layer.bindPopup(`<b>${p.name}</b><br>Nearest: ${p.nearest_point}<br>
+        Distance: ${p.dist_km} km (${p.dist_band})<br>Loan: MK ${fmt(p.amount)}<br>
+        Status: ${p.status}<br>Arrears: MK ${fmt(p.arrears_amount)}`);
+    }
+  }).addTo(map);
+  const colors = mode === 'band' ? bandColor : statusColor;
+  $('legend').innerHTML = Object.entries(colors)
+    .map(([k, c]) => `<span style="background:${c}"></span>${k}`).join('');
+}
+
+async function loadSites() {
+  if (spLayer) map.removeLayer(spLayer);
+  const sp = await get('/api/service-points');
+  spLayer = L.geoJSON(sp, {
+    pointToLayer: (f, ll) => {
+      if (f.properties.point_type === 'candidate')
+        return L.circleMarker(ll, {radius:9, color:'#6a1b9a', fillColor:'#ce93d8', fillOpacity:0.9});
+      const g = L.layerGroup([
+        L.circle(ll, {radius: thr() * 1000, color:'#1565c0', weight:1, dashArray:'4', fill:false}),
+        L.marker(ll)]);
+      return g;
+    },
+    onEachFeature: (f, l) => l.bindPopup(`<b>${f.properties.name}</b><br>${f.properties.point_type}`)
+  }).addTo(map);
+}
+
+async function loadStats() {
+  const d = await get('/api/stats/districts?threshold=' + thr());
+  const tbl = $('dist');
+  tbl.innerHTML = '<tr><th>District</th><th>Underserved</th><th>Total</th></tr>';
+  d.forEach(r => tbl.insertAdjacentHTML('beforeend',
+    `<tr><td>${r.district}</td><td>${r.underserved_clients}</td><td>${r.total_clients}</td></tr>`));
+  $('k-total').textContent = d.reduce((s, r) => s + r.total_clients, 0);
+  $('k-under').textContent = d.reduce((s, r) => s + r.underserved_clients, 0);
+  $('k-arrears').textContent = (d.reduce((s, r) => s + r.total_arrears_mk, 0) / 1e6).toFixed(1);
+}
+
+async function init() {
+  clientData = await get('/api/clients');
+  drawClients();
+  await loadSites();
+  await loadStats();
+  let bands = await get('/api/stats/bands');
+  bands.sort((a, b) => order.indexOf(a.dist_band) - order.indexOf(b.dist_band));
+  new Chart($('chart'), {
+    type: 'bar',
+    data: { labels: bands.map(b => b.dist_band),
+            datasets: [{ data: bands.map(b => b.pct_in_arrears),
+                         backgroundColor: bands.map(b => bandColor[b.dist_band]) }] },
+    options: { plugins: { legend: { display:false } }, scales: { y: { beginAtZero:true, max:100 } } }
+  });
+}
+
+$('mode').addEventListener('change', drawClients);
+$('thr').addEventListener('change', () => { drawClients(); loadSites(); loadStats(); });
+
+map.on('click', async e => {
+  clicked = e.latlng;
+  const r = await get(`/api/candidate?lon=${e.latlng.lng}&lat=${e.latlng.lat}&radius_km=${rad()}&threshold=${thr()}`);
+  if (candLayer) map.removeLayer(candLayer);
+  candLayer = L.layerGroup([
+    L.circle(e.latlng, {radius: rad() * 1000, color:'#6a1b9a', fillOpacity:0.1}),
+    L.marker(e.latlng)]).addTo(map);
+  $('cand-result').innerHTML =
+    `<b>Reaches ${r.underserved_reached} underserved clients</b><br>
+     Arrears exposure: MK ${fmt(r.arrears_mk)} (within ${rad()} km)<br>
+     Nearest existing point: ${r.nearest_point}, ${r.nearest_km.toFixed(1)} km away`;
+  $('save').disabled = false;
+});
+
+$('save').addEventListener('click', async () => {
+  if (!clicked) return;
+  const name = prompt('Name for this candidate site:', 'Candidate site');
+  if (name === null) return;
+  await fetch('/api/save-candidate', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name, lon: clicked.lng, lat: clicked.lat }) });
+  $('cand-result').innerHTML += '<br><b>Saved to the database.</b>';
+  loadSites();
+});
+
+$('recommend').addEventListener('click', async () => {
+  const picks = await get(`/api/recommend?threshold=${thr()}&radius_km=${rad()}&n=3`);
+  if (recLayer) map.removeLayer(recLayer);
+  recLayer = L.layerGroup();
+  picks.forEach((p, i) => {
+    L.circle([p.lat, p.lon], {radius: rad() * 1000, color:'#00838f', fillOpacity:0.08}).addTo(recLayer);
+    L.marker([p.lat, p.lon]).bindTooltip('#' + (i + 1), {permanent:true, direction:'top'}).addTo(recLayer);
+  });
+  recLayer.addTo(map);
+  $('rec-result').innerHTML = picks.length
+    ? picks.map((p, i) => `<b>#${i + 1}</b> reaches ${p.reached} underserved clients, MK ${fmt(p.arrears_mk)} arrears`).join('<br>')
+    : 'No underserved clients at this threshold.';
+});
+
+$('clear').addEventListener('click', async () => {
+  await fetch('/api/clear-candidates', { method:'POST' });
+  loadSites();
+});
+
+init();
+</script>
+</body>
+</html>
