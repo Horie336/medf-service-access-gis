@@ -1,3 +1,9 @@
+-- MEDF Service Access & Repayment Risk: database setup (PostgreSQL + PostGIS)
+-- Branch locations are MEDF Eastern Region branches.
+-- ALL CLIENT AND LOAN DATA IS SYNTHETIC. Arrears levels are set to reflect the
+-- scale of the repayment challenge, and the distance-arrears pattern is built in
+-- to illustrate the method. It is not a finding about real clients.
+
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 DROP VIEW  IF EXISTS client_access;
@@ -37,17 +43,15 @@ CREATE INDEX idx_clients_geom ON clients        USING GIST (geom);
 CREATE INDEX idx_loans_client ON loans (client_id);
 
 INSERT INTO service_points (name, point_type, district, region, geom) VALUES
- ('Zomba Branch',      'branch', 'Zomba',      'Eastern', ST_SetSRID(ST_MakePoint(35.318, -15.385), 4326)),
- ('Mangochi Branch',   'branch', 'Mangochi',   'Eastern', ST_SetSRID(ST_MakePoint(35.264, -14.478), 4326)),
- ('Machinga Branch',   'branch', 'Machinga',   'Eastern', ST_SetSRID(ST_MakePoint(35.520, -14.972), 4326)),
- ('Balaka Branch',     'branch', 'Balaka',     'Eastern', ST_SetSRID(ST_MakePoint(34.957, -14.980), 4326)),
- ('Liwonde Branch',    'branch', 'Machinga',   'Eastern', ST_SetSRID(ST_MakePoint(35.222, -15.063), 4326)),
- ('Phalombe Branch',   'branch', 'Phalombe',   'Eastern', ST_SetSRID(ST_MakePoint(35.652, -15.803), 4326)),
- ('Mulanje Branch',    'branch', 'Mulanje',    'Eastern', ST_SetSRID(ST_MakePoint(35.500, -16.033), 4326)),
- ('Chiradzulu Branch', 'branch', 'Chiradzulu', 'Eastern', ST_SetSRID(ST_MakePoint(35.180, -15.700), 4326));
+ ('Zomba Branch',    'branch', 'Zomba',    'Eastern', ST_SetSRID(ST_MakePoint(35.3149392, -15.3865634), 4326)),
+ ('Liwonde Branch',  'branch', 'Machinga', 'Eastern', ST_SetSRID(ST_MakePoint(35.2280368, -15.0690576), 4326)),
+ ('Balaka Branch',   'branch', 'Balaka',   'Eastern', ST_SetSRID(ST_MakePoint(34.9553063, -14.9894658), 4326)),
+ ('Mangochi Branch', 'branch', 'Mangochi', 'Eastern', ST_SetSRID(ST_MakePoint(35.271537,  -14.480091),  4326)),
+ ('Ntcheu Branch',   'branch', 'Ntcheu',   'Eastern', ST_SetSRID(ST_MakePoint(34.6372881, -14.8162265), 4326));
 
 SELECT setseed(0.42);
 
+-- 300 synthetic clients, 1-25 km from the branches
 WITH numbered AS (
   SELECT service_point_id, geom,
          ROW_NUMBER() OVER (ORDER BY service_point_id) AS rn,
@@ -73,13 +77,15 @@ SELECT 'Client ' || g,
        ), 4326)
 FROM raw;
 
+-- Synthetic loans. Chance of arrears = 33% + 3% per km, capped at 88%.
+-- Clients in arrears owe 50-90% of their loan; 40% of them are in default.
 WITH base AS (
   SELECT c.client_id,
          n.km,
          round((50000 + random() * 1450000)::numeric, -3)  AS amount,
          random()                                          AS r_status,
          random()                                          AS r_default,
-         0.2 + random() * 0.7                              AS arrears_share,
+         0.5 + random() * 0.4                              AS arrears_share,
          (CURRENT_DATE - (random() * 730)::int)            AS disbursed
   FROM clients c
   CROSS JOIN LATERAL (
@@ -93,10 +99,10 @@ WITH base AS (
 INSERT INTO loans (client_id, amount, status, arrears_amount, disbursed_date)
 SELECT client_id,
        amount,
-       CASE WHEN r_status < LEAST(0.08 + 0.025 * km, 0.75)
-            THEN CASE WHEN r_default < 0.35 THEN 'default' ELSE 'late' END
+       CASE WHEN r_status < LEAST(0.33 + 0.03 * km, 0.88)
+            THEN CASE WHEN r_default < 0.40 THEN 'default' ELSE 'late' END
             ELSE 'performing' END,
-       CASE WHEN r_status < LEAST(0.08 + 0.025 * km, 0.75)
+       CASE WHEN r_status < LEAST(0.33 + 0.03 * km, 0.88)
             THEN round((amount * arrears_share)::numeric, -2)
             ELSE 0 END,
        disbursed

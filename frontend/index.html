@@ -75,7 +75,7 @@ const fmt = n => Math.round(n).toLocaleString();
 const thr = () => parseFloat($('thr').value) || 10;
 const rad = () => parseFloat($('radius').value) || 8;
 
-const map = L.map('map').setView([-15.2, 35.3], 8);
+const map = L.map('map').setView([-14.95, 35.0], 8);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   {maxZoom:18, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
