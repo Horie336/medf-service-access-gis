@@ -53,8 +53,7 @@ made without strong geographic evidence.
 # \## Setup (work in progress)
 
 # 
-1. Install PostgreSQL and PostGIS, and create a database (this project used the
-   name `MEDF GIS`; any name works if you set `DB_NAME` in step 4).
+1. Install PostgreSQL and PostGIS, and create a database.
 2. Run `database/db_setup.sql` in pgAdmin's Query Tool or with `psql`.
    It creates the tables, loads the service points, generates 300 synthetic clients
    and loans, and creates the `client_access` view.
